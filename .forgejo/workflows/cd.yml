@@ -1,0 +1,139 @@
+name: Forgejo CD
+
+on:
+  push:
+    branches:
+      - master
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      publish_latest:
+        description: Also publish the latest tag
+        required: true
+        type: boolean
+        default: false
+
+concurrency:
+  group: nitter-cd-${{ forgejo.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish-image:
+    name: Build and publish OCI image
+    runs-on: docker-publish
+    env:
+      REGISTRY_OVERRIDE: ${{ vars.CONTAINER_REGISTRY }}
+      MANUAL_LATEST: ${{ inputs.publish_latest }}
+
+    steps:
+      - name: Verify publish runner
+        shell: sh
+        run: |
+          set -eu
+          command -v git >/dev/null
+          command -v docker >/dev/null
+          docker version
+
+      - name: Checkout exact Forgejo ref
+        shell: sh
+        run: |
+          set -eu
+          git init .
+          git remote add origin "${FORGEJO_SERVER_URL}/${FORGEJO_REPOSITORY}.git"
+          git fetch --depth=1 origin "${FORGEJO_REF}"
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "${FORGEJO_SHA}"
+
+      - name: Resolve image names
+        id: image
+        shell: sh
+        run: |
+          set -eu
+
+          registry="${REGISTRY_OVERRIDE:-${FORGEJO_SERVER_URL#*://}}"
+          registry="${registry%/}"
+          image="${registry}/${FORGEJO_REPOSITORY}"
+          short_sha="$(printf '%s' "${FORGEJO_SHA}" | cut -c1-12)"
+
+          tags="${image}:sha-${short_sha}"
+
+          case "${FORGEJO_REF}" in
+            refs/heads/master)
+              tags="${tags} ${image}:latest"
+              ;;
+            refs/tags/*)
+              tag="${FORGEJO_REF#refs/tags/}"
+              tag="$(printf '%s' "${tag}" | tr '/:' '--')"
+              tags="${tags} ${image}:${tag}"
+              ;;
+          esac
+
+          if [ "${MANUAL_LATEST:-false}" = "true" ]; then
+            case " ${tags} " in
+              *" ${image}:latest "*) ;;
+              *) tags="${tags} ${image}:latest" ;;
+            esac
+          fi
+
+          printf 'registry=%s\n' "${registry}" >> "${FORGEJO_OUTPUT}"
+          printf 'image=%s\n' "${image}" >> "${FORGEJO_OUTPUT}"
+          printf 'tags=%s\n' "${tags}" >> "${FORGEJO_OUTPUT}"
+
+          echo "Publishing: ${tags}"
+
+      - name: Authenticate to Forgejo container registry
+        shell: sh
+        env:
+          REGISTRY_USER: ${{ secrets.REGISTRY_USER }}
+          REGISTRY_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
+        run: |
+          set -eu
+          test -n "${REGISTRY_USER:-}" || {
+            echo "REGISTRY_USER secret is required" >&2
+            exit 1
+          }
+          test -n "${REGISTRY_TOKEN:-}" || {
+            echo "REGISTRY_TOKEN secret is required" >&2
+            exit 1
+          }
+          printf '%s' "${REGISTRY_TOKEN}" |
+            docker login "${{ steps.image.outputs.registry }}" \
+              --username "${REGISTRY_USER}" \
+              --password-stdin
+
+      - name: Build image once
+        shell: sh
+        run: |
+          set -eu
+          set -- ${{ steps.image.outputs.tags }}
+          primary="$1"
+
+          docker build \
+            --pull \
+            --label "org.opencontainers.image.revision=${FORGEJO_SHA}" \
+            --label "org.opencontainers.image.source=${FORGEJO_SERVER_URL}/${FORGEJO_REPOSITORY}" \
+            --tag "${primary}" \
+            .
+
+          shift
+          for tag in "$@"; do
+            docker tag "${primary}" "${tag}"
+          done
+
+      - name: Push immutable and release tags
+        shell: sh
+        run: |
+          set -eu
+          for tag in ${{ steps.image.outputs.tags }}; do
+            docker push "${tag}"
+          done
+
+      - name: Report published image
+        shell: sh
+        run: |
+          set -eu
+          first="$(printf '%s\n' ${{ steps.image.outputs.tags }} | head -n1)"
+          docker pull "${first}" >/dev/null
+          digest="$(docker inspect --format='{{index .RepoDigests 0}}' "${first}")"
+          echo "Published ${digest}"
