@@ -1,0 +1,78 @@
+name: Forgejo CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+concurrency:
+  group: nitter-ci-${{ forgejo.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Nim ${{ matrix.nim }}
+    runs-on: docker
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - nim: "2.0.14"
+            image: "nimlang/nim:2.0.14-alpine-regular"
+          - nim: "2.2.10"
+            image: "nimlang/nim:2.2.10-alpine-regular"
+    container:
+      image: ${{ matrix.image }}
+
+    steps:
+      - name: Prepare build environment
+        shell: sh
+        run: |
+          set -eu
+          apk add --no-cache git libsass-dev pcre-dev
+
+      - name: Checkout exact Forgejo ref
+        shell: sh
+        run: |
+          set -eu
+          git init .
+          git remote add origin "${FORGEJO_SERVER_URL}/${FORGEJO_REPOSITORY}.git"
+          git fetch --depth=1 origin "${FORGEJO_REF}"
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "${FORGEJO_SHA}" || {
+            echo "warning: checked out $(git rev-parse HEAD), event SHA is ${FORGEJO_SHA}" >&2
+          }
+
+      - name: Install Nim dependencies
+        shell: sh
+        run: |
+          set -eu
+          nim --version
+          nimble --version
+          nimble install -y --depsOnly
+
+      - name: Compile Nitter
+        shell: sh
+        run: |
+          set -eu
+          nimble build -Y
+          test -x ./nitter
+
+      - name: Build generated assets
+        shell: sh
+        run: |
+          set -eu
+          nimble scss
+          nimble md
+          test -d public
+
+      - name: Verify release Dockerfile stays buildable by source layout
+        shell: sh
+        run: |
+          set -eu
+          test -f Dockerfile
+          test -f nitter.example.conf
+          test -f nitter.nimble
+          grep -q '^FROM nimlang/nim:' Dockerfile
