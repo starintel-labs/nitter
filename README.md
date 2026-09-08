@@ -12,6 +12,84 @@ Inspired by the [Invidious](https://github.com/iv-org/invidious) project.
 [![Test Matrix](https://github.com/zedeus/nitter/workflows/Docker/badge.svg)](https://github.com/zedeus/nitter/actions/workflows/build-docker.yml)
 [![License](https://img.shields.io/github/license/zedeus/nitter?style=flat)](#license)
 
+## StarIntel fork
+
+`starintel-labs/nitter` tracks current upstream Nitter and adds a deliberately
+small machine-consumption layer for StarIntel collectors and research tooling.
+The normal Nitter web UI and RSS routes remain intact.
+
+### Fork features
+
+- Opt-in JSON API, disabled by default
+- Optional API-key authentication
+- Machine-readable user profiles
+- User posts, replies, media, and **articles** timelines
+- Post/conversation retrieval
+- GET and POST post-search endpoints
+- Cursor pagination
+- Canonical `https://x.com/...` URLs
+- Snowflake IDs serialized as strings so downstream JSON tooling cannot lose precision
+- Normalized image/video URLs and complete video variant metadata
+- Article-preview serialization
+- Provenance metadata including collector, upstream, canonical URL, resource type, and retrieval time
+- `/api/capabilities` discovery endpoint for actors and health tooling
+- Integration coverage in the normal Nitter test workflow
+
+Enable the API with:
+
+```bash
+NITTER_ENABLE_API=true ./nitter
+```
+
+To require a key:
+
+```bash
+NITTER_ENABLE_API=true NITTER_API_KEY='change-me' ./nitter
+```
+
+Clients may authenticate with either `Authorization: Bearer <key>` or
+`X-API-Key: <key>`.
+
+Current endpoints:
+
+```text
+GET  /api/capabilities
+GET  /api/user/:name
+GET  /api/user/:name/posts?cursor=...
+GET  /api/user/:name/replies?cursor=...
+GET  /api/user/:name/media?cursor=...
+GET  /api/user/:name/articles?cursor=...
+GET  /api/post/:id?cursor=...
+GET  /api/search/posts?q=...&cursor=...
+POST /api/search/posts
+```
+
+For POST search, send JSON such as:
+
+```json
+{"q":"from:OpenAI filter:media","cursor":""}
+```
+
+### Where the fork ideas came from
+
+The first API pass was based on the JSON API work in
+[`yao177/nitter-plus`](https://github.com/yao177/nitter-plus), but was ported
+onto current upstream Nitter rather than merging that fork wholesale because it
+had substantially diverged from upstream.
+
+Additional design ideas came from active 2026 X/Twitter collection projects:
+
+- [`zedeus/nitter`](https://github.com/zedeus/nitter): the underlying unofficial GraphQL/session machinery and privacy-oriented backend architecture.
+- [`tamnd/x-cli`](https://github.com/tamnd/x-cli): tiered collection across public syndication, guest GraphQL, and session GraphQL; normalized pipeline output; string Snowflake IDs.
+- [`mkubicek/xTap`](https://github.com/mkubicek/xTap): normalized archival output, explicit capture provenance, media handling, and JSONL-oriented pipelines.
+- [`vladkens/twscrape`](https://github.com/vladkens/twscrape), [`d60/twikit`](https://github.com/d60/twikit), and [`Altimis/Scweet`](https://github.com/Altimis/Scweet): evidence that session-backed internal GraphQL remains an important collection path, while also showing how frequently X changes query IDs, transaction IDs, feature flags, and web bundles.
+
+The design research and follow-up architecture are recorded in
+[`docs/twitter-scraping-research.md`](docs/twitter-scraping-research.md).
+The intended direction is a tiered collector that tries cheap public surfaces
+first, then guest GraphQL, then managed session GraphQL, while exposing one
+stable normalized API to downstream StarIntel actors.
+
 ## Features
 
 - No JavaScript required
