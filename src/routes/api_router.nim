@@ -37,10 +37,10 @@ proc toIso(dt: DateTime): JsonNode =
   if dt.year <= 1:
     newJNull()
   else:
-    %dt.utc.format("yyyy-MM-dd'T'HH:mm:ss'Z'")
+    %dt.format("yyyy-MM-dd'T'HH:mm:ss'Z'")
 
 proc retrievedAt(): string =
-  now().utc.format("yyyy-MM-dd'T'HH:mm:ss'Z'")
+  getTime().utc.format("yyyy-MM-dd'T'HH:mm:ss'Z'")
 
 proc verifiedToJson(verifiedType: VerifiedType): JsonNode =
   if verifiedType == VerifiedType.none:
