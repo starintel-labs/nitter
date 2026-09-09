@@ -147,6 +147,6 @@ jobs:
 
       - name: Run Tests
         run: |
-          ./nitter &
+          NITTER_ENABLE_API=true ./nitter &
           cd tests
           poetry run pytest -n2 --rs .
